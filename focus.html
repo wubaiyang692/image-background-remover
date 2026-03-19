@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>专注模式</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #e8f5f0;
+      --surface: rgba(255,255,255,0.55);
+      --surface-solid: #d4ede5;
+      --border: rgba(52,180,130,0.18);
+      --accent: #10b981;
+      --accent2: #059669;
+      --accent3: #34d399;
+      --teal: #0d9488;
+      --text: #1a3a2e;
+      --muted: #5a8a76;
+      --muted2: #7aaa94;
+      --glow: rgba(16,185,129,0.25);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Mesh gradient background */
+    .ambient {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        linear-gradient(135deg, #c8f0e0 0%, #e8f5f0 40%, #d0f0e8 100%),
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(52,211,153,0.25) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(16,185,129,0.20) 0%, transparent 60%);
+    }
+    .ambient::before {
+      content: '';
+      position: absolute;
+      top: 5%;
+      left: 5%;
+      width: 45%;
+      height: 45%;
+      background: radial-gradient(ellipse, rgba(52,211,153,0.30) 0%, transparent 70%);
+      animation: drift1 22s ease-in-out infinite alternate;
+      border-radius: 50%;
+      filter: blur(60px);
+    }
+    .ambient::after {
+      content: '';
+      position: absolute;
+      bottom: 5%;
+      right: 5%;
+      width: 40%;
+      height: 40%;
+      background: radial-gradient(ellipse, rgba(16,185,129,0.25) 0%, transparent 70%);
+      animation: drift2 28s ease-in-out infinite alternate;
+      border-radius: 50%;
+      filter: blur(60px);
+    }
+    @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(6%,10%) scale(1.1); } }
+    @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-6%,-8%) scale(1.08); } }
+
+    /* Noise texture overlay */
+    .noise {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-size: 200px;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+      width: 100%;
+      max-width: 460px;
+      padding: 32px 24px;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .header h1 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+    }
+    .header-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin: 0 auto;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    /* Mode tabs */
+    .modes {
+      display: flex;
+      gap: 4px;
+      background: var(--surface);
+      padding: 4px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    .mode-btn {
+      padding: 10px 26px;
+      border: none;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+      font-weight: 600;
+      font-family: inherit;
+      letter-spacing: 0.02em;
+    }
+    .mode-btn.active {
+      background: linear-gradient(135deg, var(--accent), var(--accent3));
+      color: white;
+      box-shadow: 0 2px 12px rgba(244,114,182,0.35);
+    }
+    .mode-btn:hover:not(.active) {
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+    }
+
+    /* Timer ring */
+    .timer-wrap {
+      position: relative;
+      width: 320px;
+      height: 320px;
+    }
+    /* Glow behind ring */
+    .timer-wrap::before {
+      content: '';
+      position: absolute;
+      inset: 20px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(244,114,182,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .timer-svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 0 12px rgba(16,185,129,0.35));
+    }
+    .ring-bg {
+      fill: none;
+      stroke: rgba(255,255,255,0.06);
+      stroke-width: 5;
+    }
+    .ring-track {
+      fill: none;
+      stroke: rgba(255,255,255,0.03);
+      stroke-width: 14;
+    }
+    .ring-progress {
+      fill: none;
+      stroke: url(#ringGrad);
+      stroke-width: 5;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear;
+    }
+    .timer-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .timer-display {
+      font-size: 5.5rem;
+      font-weight: 200;
+      letter-spacing: -5px;
+      font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, #1a3a2e 30%, #10b981);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .timer-label {
+      font-size: 0.9rem;
+      color: var(--muted);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    .btn {
+      border: none;
+      cursor: pointer;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+      font-family: inherit;
+    }
+    .btn-main {
+      width: 68px;
+      height: 68px;
+      background: linear-gradient(135deg, var(--accent), var(--teal));
+      font-size: 1.3rem;
+      box-shadow: 0 4px 24px rgba(16,185,129,0.4), 0 0 0 1px rgba(16,185,129,0.2);
+    }
+    .btn-main:hover {
+      transform: scale(1.07);
+      box-shadow: 0 6px 32px rgba(16,185,129,0.55), 0 0 0 1px rgba(16,185,129,0.3);
+    }
+    .btn-main:active { transform: scale(0.96); }
+    .btn-secondary {
+      width: 46px;
+      height: 46px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 1rem;
+      color: var(--muted);
+      backdrop-filter: blur(8px);
+    }
+    .btn-secondary:hover {
+      color: var(--text);
+      border-color: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+    }
+
+    /* Session dots */
+    .sessions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.08);
+      transition: all 0.4s;
+    }
+    .dot.done {
+      background: linear-gradient(135deg, var(--accent), var(--teal));
+      border-color: transparent;
+      box-shadow: 0 0 8px rgba(16,185,129,0.5);
+    }
+    .dot.current {
+      background: var(--accent3);
+      border-color: transparent;
+      box-shadow: 0 0 10px rgba(52,211,153,0.6);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.5; transform:scale(0.8); } }
+
+    /* Task input */
+    .task-section {
+      width: 100%;
+    }
+    .task-label {
+      font-size: 0.82rem;
+      color: var(--muted2);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+    .task-input-wrap {
+      position: relative;
+    }
+    .task-input-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.9rem;
+      pointer-events: none;
+    }
+    .task-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 15px 16px 15px 44px;
+      color: var(--text);
+      font-size: 1.05rem;
+      outline: none;
+      transition: all 0.25s;
+      font-family: inherit;
+      backdrop-filter: blur(8px);
+    }
+    .task-input:focus {
+      border-color: rgba(16,185,129,0.4);
+      background: rgba(16,185,129,0.04);
+      box-shadow: 0 0 0 3px rgba(16,185,129,0.08);
+    }
+    .task-input::placeholder { color: var(--muted2); }
+
+    /* Stats bar */
+    .stats {
+      display: flex;
+      gap: 0;
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .stat {
+      flex: 1;
+      text-align: center;
+      padding: 14px 8px;
+      position: relative;
+    }
+    .stat + .stat::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 20%;
+      height: 60%;
+      width: 1px;
+      background: var(--border);
+    }
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 300;
+      background: linear-gradient(135deg, var(--accent2), var(--teal));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--muted2);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: 3px;
+      font-weight: 600;
+    }
+
+    /* Notification toast */
+    .toast {
+      position: fixed;
+      bottom: 36px;
+      left: 50%;
+      transform: translateX(-50%) translateY(90px);
+      background: rgba(232,245,240,0.92);
+      border: 1px solid rgba(16,185,129,0.3);
+      border-radius: 14px;
+      padding: 12px 28px;
+      font-size: 0.88rem;
+      transition: transform 0.45s cubic-bezier(0.34,1.56,0.64,1);
+      z-index: 100;
+      white-space: nowrap;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 32px rgba(16,185,129,0.15), 0 0 0 1px rgba(16,185,129,0.1);
+      color: var(--text);
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Breathing overlay */
+    .breathe-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(232,245,240,0.94);
+      backdrop-filter: blur(20px);
+      z-index: 50;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+    }
+    .breathe-overlay.active { display: flex; }
+    .breathe-title {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .breathe-ring {
+      position: relative;
+      width: 160px;
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .breathe-ring::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(16,185,129,0.25);
+      animation: breathe-outer 4s ease-in-out infinite;
+    }
+    .breathe-circle {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(16,185,129,0.7), rgba(13,148,136,0.7));
+      animation: breathe 4s ease-in-out infinite;
+      box-shadow: 0 0 40px rgba(16,185,129,0.35);
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(0.65); opacity: 0.5; }
+      50% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes breathe-outer {
+      0%,100% { transform: scale(0.8); opacity: 0.3; }
+      50% { transform: scale(1.15); opacity: 0.8; }
+    }
+    .breathe-text {
+      font-size: 1rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      min-width: 80px;
+      text-align: center;
+    }
+    .breathe-close {
+      margin-top: 8px;
+      padding: 10px 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-family: inherit;
+      transition: all 0.2s;
+      letter-spacing: 0.05em;
+    }
+    .breathe-close:hover {
+      color: var(--text);
+      border-color: rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.07);
+    }
+  </style>
+</head>
+<body>
+
+<div class="ambient"></div>
+<div class="noise"></div>
+
+<!-- Breathing overlay -->
+<div class="breathe-overlay" id="breatheOverlay">
+  <div class="breathe-title">呼吸练习</div>
+  <div class="breathe-ring">
+    <div class="breathe-circle"></div>
+  </div>
+  <div class="breathe-text" id="breatheText">吸气...</div>
+  <button class="breathe-close" onclick="closeBreathe()">关闭</button>
+</div>
+
+<div class="container">
+  <div class="header">
+    <h1>专注模式</h1>
+    <div class="header-dot"></div>
+  </div>
+
+  <!-- Mode selector -->
+  <div class="modes">
+    <button class="mode-btn active" onclick="setMode('focus',25)">专注</button>
+    <button class="mode-btn" onclick="setMode('short',5)">短休</button>
+    <button class="mode-btn" onclick="setMode('long',15)">长休</button>
+  </div>
+
+  <!-- Timer -->
+  <div class="timer-wrap">
+    <svg class="timer-svg" viewBox="0 0 320 320">
+      <defs>
+        <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#10b981"/>
+          <stop offset="100%" stop-color="#0d9488"/>
+        </linearGradient>
+        <linearGradient id="ringGradGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#34d399"/>
+          <stop offset="100%" stop-color="#6ee7b7"/>
+        </linearGradient>
+      </defs>
+      <circle class="ring-track" cx="160" cy="160" r="140"/>
+      <circle class="ring-bg" cx="160" cy="160" r="140"/>
+      <circle class="ring-progress" id="ring" cx="160" cy="160" r="140"
+        stroke-dasharray="879.6" stroke-dashoffset="0"/>
+    </svg>
+    <div class="timer-center">
+      <div class="timer-display" id="timerDisplay">25:00</div>
+      <div class="timer-label" id="timerLabel">准备开始</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn btn-secondary" onclick="openBreathe()" title="呼吸练习">🌬️</button>
+    <button class="btn btn-main" id="mainBtn" onclick="toggleTimer()">▶</button>
+    <button class="btn btn-secondary" onclick="resetTimer()" title="重置">↺</button>
+  </div>
+
+  <!-- Session dots -->
+  <div class="sessions" id="sessionDots"></div>
+
+  <!-- Task -->
+  <div class="task-section">
+    <div class="task-label">当前任务</div>
+    <div class="task-input-wrap">
+      <span class="task-input-icon">✦</span>
+      <input class="task-input" id="taskInput" type="text" placeholder="我现在要专注做什么？" maxlength="60">
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="statSessions">0</div>
+      <div class="stat-label">今日专注</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statMinutes">0</div>
+      <div class="stat-label">专注分钟</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statStreak">0</div>
+      <div class="stat-label">连续天数</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // State
+  const CIRCUMFERENCE = 2 * Math.PI * 140; // ~879.6
+  let mode = 'focus';
+  let totalSeconds = 25 * 60;
+  let remaining = totalSeconds;
+  let running = false;
+  let interval = null;
+  let completedInCycle = 0; // 0-3 within a set of 4
+  let breathePhase = 0;
+  let breatheInterval = null;
+
+  // Persistence
+  const today = new Date().toDateString();
+  let stats = JSON.parse(localStorage.getItem('focus_stats') || '{}');
+  if (stats.date !== today) {
+    stats = { date: today, sessions: 0, minutes: 0 };
+  }
+  let streak = parseInt(localStorage.getItem('focus_streak') || '0');
+
+  function saveStats() {
+    localStorage.setItem('focus_stats', JSON.stringify(stats));
+  }
+
+  function updateStatsUI() {
+    document.getElementById('statSessions').textContent = stats.sessions;
+    document.getElementById('statMinutes').textContent = stats.minutes;
+    document.getElementById('statStreak').textContent = streak;
+  }
+
+  // Dots (4 per cycle)
+  function renderDots() {
+    const el = document.getElementById('sessionDots');
+    el.innerHTML = '';
+    for (let i = 0; i < 4; i++) {
+      const d = document.createElement('div');
+      d.className = 'dot' + (i < completedInCycle ? ' done' : (i === completedInCycle && running ? ' current' : ''));
+      el.appendChild(d);
+    }
+  }
+
+  // Ring
+  function updateRing() {
+    const pct = remaining / totalSeconds;
+    const offset = CIRCUMFERENCE * (1 - pct);
+    const ring = document.getElementById('ring');
+    ring.style.strokeDashoffset = offset;
+    // Color shift: green when almost done
+    if (pct < 0.1) ring.style.stroke = 'url(#ringGradGreen)';
+    else if (mode === 'focus') ring.style.stroke = 'url(#ringGrad)';
+    else ring.style.stroke = 'url(#ringGradGreen)';
+  }
+
+  // Display
+  function updateDisplay() {
+    const m = Math.floor(remaining / 60).toString().padStart(2, '0');
+    const s = (remaining % 60).toString().padStart(2, '0');
+    document.getElementById('timerDisplay').textContent = `${m}:${s}`;
+    document.title = running ? `${m}:${s} · 专注中` : '专注模式';
+    updateRing();
+  }
+
+  function setLabel(txt) {
+    document.getElementById('timerLabel').textContent = txt;
+  }
+
+  // Mode
+  function setMode(m, mins) {
+    if (running) return;
+    mode = m;
+    totalSeconds = mins * 60;
+    remaining = totalSeconds;
+    document.querySelectorAll('.mode-btn').forEach((b, i) => {
+      b.classList.toggle('active', ['focus','short','long'][i] === m);
+    });
+    setLabel('准备开始');
+    updateDisplay();
+  }
+
+  // Timer
+  function toggleTimer() {
+    if (running) {
+      pauseTimer();
+    } else {
+      startTimer();
+    }
+  }
+
+  function startTimer() {
+    running = true;
+    document.getElementById('mainBtn').textContent = '⏸';
+    setLabel(mode === 'focus' ? '专注中...' : '休息中...');
+    renderDots();
+    interval = setInterval(tick, 1000);
+  }
+
+  function pauseTimer() {
+    running = false;
+    clearInterval(interval);
+    document.getElementById('mainBtn').textContent = '▶';
+    setLabel('已暂停');
+    renderDots();
+  }
+
+  function resetTimer() {
+    pauseTimer();
+    remaining = totalSeconds;
+    setLabel('准备开始');
+    updateDisplay();
+    renderDots();
+  }
+
+  function tick() {
+    if (remaining <= 0) {
+      complete();
+      return;
+    }
+    remaining--;
+    updateDisplay();
+  }
+
+  function complete() {
+    clearInterval(interval);
+    running = false;
+    document.getElementById('mainBtn').textContent = '▶';
+
+    if (mode === 'focus') {
+      stats.sessions++;
+      stats.minutes += Math.round(totalSeconds / 60);
+      saveStats();
+      updateStatsUI();
+      completedInCycle = (completedInCycle + 1) % 4;
+      showToast('🎉 专注完成！好好休息一下');
+      playBeep(440, 0.3);
+      setTimeout(() => playBeep(550, 0.3), 350);
+    } else {
+      showToast('✅ 休息结束，继续专注！');
+      playBeep(330, 0.3);
+    }
+
+    remaining = totalSeconds;
+    setLabel('已完成');
+    updateDisplay();
+    renderDots();
+  }
+
+  // Toast
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  // Beep
+  function playBeep(freq, dur) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      osc.start();
+      osc.stop(ctx.currentTime + dur);
+    } catch(e) {}
+  }
+
+  // Breathing
+  const breatheSteps = ['吸气...', '屏息...', '呼气...', '屏息...'];
+  const breatheDurations = [4000, 4000, 4000, 4000]; // box breathing 4-4-4-4
+
+  function openBreathe() {
+    document.getElementById('breatheOverlay').classList.add('active');
+    breathePhase = 0;
+    runBreathe();
+  }
+
+  function runBreathe() {
+    document.getElementById('breatheText').textContent = breatheSteps[breathePhase];
+    breatheInterval = setTimeout(() => {
+      breathePhase = (breathePhase + 1) % 4;
+      runBreathe();
+    }, breatheDurations[breathePhase]);
+  }
+
+  function closeBreathe() {
+    clearTimeout(breatheInterval);
+    document.getElementById('breatheOverlay').classList.remove('active');
+  }
+
+  // Init
+  updateDisplay();
+  updateStatsUI();
+  renderDots();
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.target === document.getElementById('taskInput')) return;
+    if (e.code === 'Space') { e.preventDefault(); toggleTimer(); }
+    if (e.code === 'KeyR') resetTimer();
+    if (e.code === 'KeyB') openBreathe();
+  });
+</script>
+</body>
+</html>

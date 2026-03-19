@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>CET-4 单词连连看</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background: linear-gradient(135deg,#1a1a2e,#16213e,#0f3460); min-height:100vh; display:flex; flex-direction:column; align-items:center; font-family:'Microsoft YaHei',sans-serif; color:#fff; }
+h1 { margin:20px 0 4px; font-size:26px; letter-spacing:2px; color:#e0c97f; text-shadow:0 0 20px rgba(224,201,127,0.5); }
+#subtitle { font-size:13px; color:#aaa; margin-bottom:12px; }
+#stats { display:flex; gap:30px; margin-bottom:14px; font-size:15px; }
+#stats span { background:rgba(255,255,255,0.08); padding:6px 18px; border-radius:20px; }
+#stats .val { color:#e0c97f; font-weight:bold; }
+#game-area { display:flex; gap:24px; align-items:flex-start; }
+.col { display:flex; flex-direction:column; gap:10px; }
+.card {
+  width:160px; padding:12px 16px; border-radius:10px; cursor:pointer;
+  font-size:14px; text-align:center; user-select:none;
+  border:2px solid transparent; transition:all .15s;
+  position:relative; overflow:hidden;
+}
+.card.english { background:rgba(52,152,219,0.2); border-color:rgba(52,152,219,0.4); color:#7ec8e3; }
+.card.chinese { background:rgba(46,204,113,0.2); border-color:rgba(46,204,113,0.4); color:#a8e6cf; }
+.card:hover { transform:translateY(-2px); box-shadow:0 4px 20px rgba(255,255,255,0.1); }
+.card.selected { border-color:#e0c97f; background:rgba(224,201,127,0.25); color:#fff; transform:scale(1.04); box-shadow:0 0 16px rgba(224,201,127,0.4); }
+.card.matched { opacity:0; pointer-events:none; transform:scale(0.8); transition:all .4s; }
+.card.wrong { border-color:#e74c3c; background:rgba(231,76,60,0.3); animation:shake .3s; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+#msg { margin-top:16px; font-size:18px; min-height:28px; color:#e0c97f; letter-spacing:1px; }
+#controls { margin-top:16px; display:flex; gap:12px; }
+button { padding:10px 28px; border:none; border-radius:24px; font-size:15px; cursor:pointer; font-family:inherit; transition:all .2s; }
+#btn-next { background:linear-gradient(135deg,#e0c97f,#c9a227); color:#1a1a2e; font-weight:bold; }
+#btn-next:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(224,201,127,0.4); }
+#btn-restart { background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.2); }
+#btn-restart:hover { background:rgba(255,255,255,0.2); }
+#progress { width:360px; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; margin-bottom:10px; overflow:hidden; }
+#progress-bar { height:100%; background:linear-gradient(90deg,#e0c97f,#c9a227); border-radius:3px; transition:width .4s; }
+#combo { font-size:13px; color:#aaa; min-height:20px; }
+.combo-flash { color:#ff6b6b; font-weight:bold; animation:pop .4s; }
+@keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.3)} 100%{transform:scale(1)} }
+</style>
+</head>
+<body>
+<h1>🎓 CET-4 单词连连看</h1>
+<div id="subtitle">点击英文单词，再点击对应的中文释义</div>
+<div id="progress"><div id="progress-bar" style="width:0%"></div></div>
+<div id="stats">
+  <span>得分 <span class="val" id="score">0</span></span>
+  <span>关卡 <span class="val" id="level">1</span></span>
+  <span>时间 <span class="val" id="timer">60</span>s</span>
+  <span>连击 <span class="val" id="combo-val">0</span></span>
+</div>
+<div id="combo"></div>
+<div id="game-area">
+  <div class="col" id="col-en"></div>
+  <div class="col" id="col-zh"></div>
+</div>
+<div id="msg"></div>
+<div id="controls">
+  <button id="btn-next" onclick="nextRound()" style="display:none">下一关 →</button>
+  <button id="btn-restart" onclick="restart()">重新开始</button>
+</div>
+
+<script>
+const WORDS = [
+  {en:'abandon',zh:'放弃'},
+  {en:'abstract',zh:'抽象的'},
+  {en:'abundant',zh:'丰富的'},
+  {en:'academic',zh:'学术的'},
+  {en:'accelerate',zh:'加速'},
+  {en:'access',zh:'进入；通道'},
+  {en:'accomplish',zh:'完成'},
+  {en:'accurate',zh:'准确的'},
+  {en:'acknowledge',zh:'承认'},
+  {en:'acquire',zh:'获得'},
+  {en:'adapt',zh:'适应'},
+  {en:'adequate',zh:'足够的'},
+  {en:'adjust',zh:'调整'},
+  {en:'admire',zh:'钦佩'},
+  {en:'adopt',zh:'采用；收养'},
+  {en:'advance',zh:'前进；提前'},
+  {en:'advocate',zh:'提倡；倡导者'},
+  {en:'affect',zh:'影响'},
+  {en:'afford',zh:'负担得起'},
+  {en:'aggressive',zh:'侵略性的'},
+  {en:'allocate',zh:'分配'},
+  {en:'alternative',zh:'替代的；选择'},
+  {en:'ambiguous',zh:'模糊的'},
+  {en:'analyze',zh:'分析'},
+  {en:'anticipate',zh:'预期'},
+  {en:'apparent',zh:'明显的'},
+  {en:'appreciate',zh:'欣赏；感激'},
+  {en:'approach',zh:'方法；接近'},
+  {en:'appropriate',zh:'适当的'},
+  {en:'approximately',zh:'大约'},
+  {en:'arbitrary',zh:'任意的'},
+  {en:'aspect',zh:'方面'},
+  {en:'assess',zh:'评估'},
+  {en:'assume',zh:'假设'},
+  {en:'attach',zh:'附上；依附'},
+  {en:'attitude',zh:'态度'},
+  {en:'attribute',zh:'归因于；属性'},
+  {en:'authority',zh:'权威；当局'},
+  {en:'available',zh:'可用的'},
+  {en:'aware',zh:'意识到的'},
+  {en:'barrier',zh:'障碍'},
+  {en:'benefit',zh:'好处；受益'},
+  {en:'bias',zh:'偏见'},
+  {en:'capacity',zh:'能力；容量'},
+  {en:'category',zh:'类别'},
+  {en:'challenge',zh:'挑战'},
+  {en:'circumstance',zh:'情况；环境'},
+  {en:'clarify',zh:'澄清'},
+  {en:'collaborate',zh:'合作'},
+  {en:'commit',zh:'承诺；犯罪'},
+  {en:'communicate',zh:'交流'},
+  {en:'complex',zh:'复杂的'},
+  {en:'concentrate',zh:'集中；专注'},
+  {en:'concept',zh:'概念'},
+  {en:'conclude',zh:'得出结论'},
+  {en:'conflict',zh:'冲突'},
+  {en:'consequence',zh:'后果'},
+  {en:'consider',zh:'考虑'},
+  {en:'consistent',zh:'一致的'},
+  {en:'contribute',zh:'贡献'},
+  {en:'controversial',zh:'有争议的'},
+  {en:'convenient',zh:'方便的'},
+  {en:'convince',zh:'说服'},
+  {en:'cooperate',zh:'合作'},
+  {en:'creative',zh:'有创造力的'},
+  {en:'critical',zh:'批判的；关键的'},
+  {en:'crucial',zh:'至关重要的'},
+  {en:'cultivate',zh:'培养'},
+  {en:'curious',zh:'好奇的'},
+  {en:'decline',zh:'下降；拒绝'},
+  {en:'define',zh:'定义'},
+  {en:'demonstrate',zh:'证明；示范'},
+  {en:'depend',zh:'依赖'},
+  {en:'derive',zh:'获得；来源于'},
+  {en:'determine',zh:'决定；确定'},
+  {en:'develop',zh:'发展'},
+  {en:'diverse',zh:'多样的'},
+  {en:'dominate',zh:'支配'},
+  {en:'efficient',zh:'高效的'},
+  {en:'eliminate',zh:'消除'},
+  {en:'emerge',zh:'出现'},
+  {en:'emphasize',zh:'强调'},
+  {en:'enable',zh:'使能够'},
+  {en:'encounter',zh:'遇到'},
+  {en:'enhance',zh:'增强'},
+  {en:'enormous',zh:'巨大的'},
+  {en:'ensure',zh:'确保'},
+  {en:'establish',zh:'建立'},
+  {en:'evaluate',zh:'评估'},
+  {en:'evident',zh:'明显的'},
+  {en:'evolve',zh:'进化；发展'},
+  {en:'examine',zh:'检查；考试'},
+  {en:'expand',zh:'扩大'},
+  {en:'explore',zh:'探索'},
+  {en:'expose',zh:'暴露'},
+  {en:'express',zh:'表达'},
+  {en:'extensive',zh:'广泛的'},
+  {en:'facilitate',zh:'促进'},
+  {en:'flexible',zh:'灵活的'},
+  {en:'focus',zh:'集中；焦点'},
+  {en:'fundamental',zh:'基本的'},
+  {en:'generate',zh:'产生'},
+  {en:'global',zh:'全球的'},
+  {en:'guarantee',zh:'保证'},
+  {en:'identify',zh:'识别；确认'},
+  {en:'ignore',zh:'忽视'},
+  {en:'implement',zh:'实施'},
+  {en:'imply',zh:'暗示'},
+  {en:'improve',zh:'改善'},
+  {en:'indicate',zh:'表明'},
+  {en:'individual',zh:'个人；个别的'},
+  {en:'influence',zh:'影响'},
+  {en:'initiative',zh:'主动性；倡议'},
+  {en:'innovate',zh:'创新'},
+  {en:'integrate',zh:'整合'},
+  {en:'interpret',zh:'解释；口译'},
+  {en:'investigate',zh:'调查'},
+  {en:'involve',zh:'涉及'},
+  {en:'justify',zh:'证明合理'},
+  {en:'maintain',zh:'维持；保持'},
+  {en:'manage',zh:'管理；设法'},
+  {en:'maximize',zh:'最大化'},
+  {en:'minimize',zh:'最小化'},
+  {en:'motivate',zh:'激励'},
+  {en:'negotiate',zh:'谈判'},
+  {en:'obtain',zh:'获得'},
+  {en:'obvious',zh:'明显的'},
+  {en:'occur',zh:'发生'},
+  {en:'opportunity',zh:'机会'},
+  {en:'organize',zh:'组织'},
+  {en:'overcome',zh:'克服'},
+  {en:'participate',zh:'参与'},
+  {en:'perceive',zh:'感知'},
+  {en:'perform',zh:'执行；表演'},
+  {en:'perspective',zh:'观点；视角'},
+  {en:'potential',zh:'潜力；潜在的'},
+  {en:'predict',zh:'预测'},
+  {en:'prefer',zh:'更喜欢'},
+  {en:'preserve',zh:'保护；保存'},
+  {en:'prevent',zh:'防止'},
+  {en:'primary',zh:'主要的'},
+  {en:'principle',zh:'原则'},
+  {en:'process',zh:'过程；处理'},
+  {en:'promote',zh:'促进；晋升'},
+  {en:'propose',zh:'提议'},
+  {en:'provide',zh:'提供'},
+  {en:'pursue',zh:'追求'},
+  {en:'recognize',zh:'认识；承认'},
+  {en:'reduce',zh:'减少'},
+  {en:'reflect',zh:'反映；反思'},
+  {en:'relevant',zh:'相关的'},
+  {en:'rely',zh:'依赖'},
+  {en:'require',zh:'需要'},
+  {en:'resolve',zh:'解决'},
+  {en:'respond',zh:'回应'},
+  {en:'reveal',zh:'揭示'},
+  {en:'significant',zh:'重要的；显著的'},
+  {en:'similar',zh:'相似的'},
+  {en:'specific',zh:'具体的'},
+  {en:'strategy',zh:'策略'},
+  {en:'strengthen',zh:'加强'},
+  {en:'sufficient',zh:'足够的'},
+  {en:'suggest',zh:'建议；暗示'},
+  {en:'support',zh:'支持'},
+  {en:'survive',zh:'生存'},
+  {en:'sustainable',zh:'可持续的'},
+  {en:'tendency',zh:'趋势；倾向'},
+  {en:'transform',zh:'转变'},
+  {en:'typical',zh:'典型的'},
+  {en:'unique',zh:'独特的'},
+  {en:'utilize',zh:'利用'},
+  {en:'various',zh:'各种各样的'},
+  {en:'vital',zh:'至关重要的'},
+  {en:'voluntary',zh:'自愿的'},
+];
+
+const PER_ROUND = 8;
+let score=0, level=1, combo=0, timerVal=60, timerInterval=null;
+let pool=[], roundWords=[], selectedEn=null, selectedZh=null;
+let matched=0, total=0;
+
+function shuffle(arr){ return arr.sort(()=>Math.random()-0.5); }
+
+function startTimer(){
+  clearInterval(timerInterval);
+  timerVal=60;
+  document.getElementById('timer').textContent=timerVal;
+  timerInterval=setInterval(()=>{
+    timerVal--;
+    document.getElementById('timer').textContent=timerVal;
+    if(timerVal<=0){ clearInterval(timerInterval); timeUp(); }
+  },1000);
+}
+
+function timeUp(){
+  showMsg('⏰ 时间到！得分：'+score);
+  document.getElementById('btn-next').style.display='none';
+  disableAll();
+}
+
+function disableAll(){
+  document.querySelectorAll('.card').forEach(c=>c.style.pointerEvents='none');
+}
+
+function initPool(){
+  pool=shuffle([...WORDS]);
+  total=pool.length;
+}
+
+function nextRound(){
+  document.getElementById('btn-next').style.display='none';
+  showMsg('');
+  level++;
+  document.getElementById('level').textContent=level;
+  renderRound();
+  startTimer();
+}
+
+function renderRound(){
+  roundWords=pool.splice(0,PER_ROUND);
+  if(roundWords.length===0){ gameComplete(); return; }
+  matched=0;
+  selectedEn=null; selectedZh=null;
+
+  const enWords=shuffle([...roundWords]);
+  const zhWords=shuffle([...roundWords]);
+
+  const colEn=document.getElementById('col-en');
+  const colZh=document.getElementById('col-zh');
+  colEn.innerHTML=''; colZh.innerHTML='';
+
+  enWords.forEach(w=>{
+    const d=document.createElement('div');
+    d.className='card english'; d.textContent=w.en; d.dataset.key=w.en;
+    d.onclick=()=>selectEn(d,w);
+    colEn.appendChild(d);
+  });
+  zhWords.forEach(w=>{
+    const d=document.createElement('div');
+    d.className='card chinese'; d.textContent=w.zh; d.dataset.key=w.en;
+    d.onclick=()=>selectZh(d,w);
+    colZh.appendChild(d);
+  });
+
+  updateProgress();
+}
+
+function selectEn(el,w){
+  if(el.classList.contains('matched')) return;
+  document.querySelectorAll('.card.english').forEach(c=>c.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedEn={el,w};
+  if(selectedZh) check();
+}
+
+function selectZh(el,w){
+  if(el.classList.contains('matched')) return;
+  document.querySelectorAll('.card.chinese').forEach(c=>c.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedZh={el,w};
+  if(selectedEn) check();
+}
+
+function check(){
+  const en=selectedEn, zh=selectedZh;
+  selectedEn=null; selectedZh=null;
+  if(en.w.en===zh.w.en){
+    // correct
+    combo++;
+    const bonus=combo>=3?combo*20:10;
+    score+=bonus;
+    document.getElementById('score').textContent=score;
+    document.getElementById('combo-val').textContent=combo;
+    en.el.classList.add('matched');
+    zh.el.classList.add('matched');
+    matched++;
+    showCombo(combo,bonus);
+    if(matched===roundWords.length){
+      clearInterval(timerInterval);
+      score+=timerVal*2; // time bonus
+      document.getElementById('score').textContent=score;
+      setTimeout(()=>{
+        if(pool.length>0){
+          showMsg('🎉 本关完成！时间奖励 +'+(timerVal*2));
+          document.getElementById('btn-next').style.display='inline-block';
+        } else { gameComplete(); }
+      },400);
+    }
+  } else {
+    // wrong
+    combo=0;
+    document.getElementById('combo-val').textContent=0;
+    en.el.classList.add('wrong'); zh.el.classList.add('wrong');
+    setTimeout(()=>{
+      en.el.classList.remove('wrong','selected');
+      zh.el.classList.remove('wrong','selected');
+    },500);
+  }
+}
+
+function showCombo(c,bonus){
+  const el=document.getElementById('combo');
+  if(c>=5) el.textContent='🔥 '+c+'连击！+'+bonus;
+  else if(c>=3) el.textContent='⚡ '+c+'连击！+'+bonus;
+  else el.textContent='+'+bonus;
+  el.className='combo-flash';
+  setTimeout(()=>{ el.className=''; el.textContent=''; },800);
+}
+
+function showMsg(t){ document.getElementById('msg').textContent=t; }
+
+function updateProgress(){
+  const done=total-pool.length-roundWords.length;
+  const pct=Math.round(done/total*100);
+  document.getElementById('progress-bar').style.width=pct+'%';
+}
+
+function gameComplete(){
+  clearInterval(timerInterval);
+  showMsg('🏆 全部完成！最终得分：'+score);
+  document.getElementById('btn-next').style.display='none';
+  disableAll();
+}
+
+function restart(){
+  clearInterval(timerInterval);
+  score=0; level=1; combo=0;
+  document.getElementById('score').textContent=0;
+  document.getElementById('level').textContent=1;
+  document.getElementById('combo-val').textContent=0;
+  document.getElementById('btn-next').style.display='none';
+  showMsg('');
+  initPool();
+  renderRound();
+  startTimer();
+}
+
+initPool();
+renderRound();
+startTimer();
+</script>
+</body>
+</html>

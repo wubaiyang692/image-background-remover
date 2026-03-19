@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Super Mario Bros - World 1-1</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+#hud { background: #000; color: #fff; font-family: monospace; font-size: 14px; display: flex; gap: 40px; padding: 6px 16px; width: 768px; }
+canvas { display: block; }
+#msg { position: absolute; color: #fff; font-family: monospace; font-size: 24px; text-align: center; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>MARIO<br><span id="score">000000</span></span>
+  <span>COIN<br><span id="coins">x00</span></span>
+  <span>WORLD<br>1-1</span>
+  <span>TIME<br><span id="timer">400</span></span>
+  <span>LIVES<br><span id="lives">x03</span></span>
+</div>
+<canvas id="c" width="768" height="432"></canvas>
+<script>
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const T = 32; // tile size
+
+// ---- LEVEL DATA ----
+// Row 0=top, row 13=bottom ground
+const W = 213, H = 14;
+const map = Array.from({length:H}, ()=>new Array(W).fill(0));
+
+// Ground rows 12-13 (with pits)
+const PITS = [[87,89],[100,101],[112,113],[134,136]];
+for(let c=0;c<W;c++){
+  let inPit = PITS.some(([s,e])=>c>=s&&c<=e);
+  if(!inPit){ map[12][c]='G'; map[13][c]='G'; }
+}
+
+// Bricks & Questions (row, col, type)
+const BLOCKS=[
+  [8,16,'Q'],[8,21,'B'],[8,22,'Q'],[8,23,'B'],[4,22,'Q'],
+  [8,77,'B'],[8,78,'B'],[8,79,'B'],[8,80,'Q'],[8,81,'B'],[4,80,'Q'],
+  [8,91,'B'],[8,92,'B'],[8,93,'B'],[8,94,'B'],
+  [7,91,'B'],[7,92,'B'],[7,93,'B'],
+  [6,91,'B'],[6,92,'B'],[5,91,'B'],
+  [8,103,'B'],[8,104,'Q'],[8,105,'Q'],[8,106,'B'],[4,104,'Q'],
+  [8,119,'B'],[8,120,'B'],[8,121,'B'],[8,128,'Q'],
+];
+BLOCKS.forEach(([r,c,t])=>{ if(r>=0&&r<H&&c>=0&&c<W) map[r][c]=t; });
+
+// Pipes [col, height in tiles]
+const PIPES=[[28,2],[38,3],[46,4],[57,4],[163,2],[179,2]];
+PIPES.forEach(([c,h])=>{
+  for(let r=12-h;r<12;r++){ map[r][c]='P'; map[r][c+1]='P'; }
+  map[12-h][c]='p'; map[12-h][c+1]='p';
+});
+
+// Flag pole col 198
+for(let r=2;r<=12;r++) map[r][198]='F';
+map[2][198]='f';
+
+// Staircase before flag (cols 188-195)
+for(let i=0;i<8;i++) for(let r=12-i;r<=12;r++) map[r][188+i]='G';
+
+// ---- STATE ----
+let score=0, coins=0, lives=3, time=400, timeAcc=0;
+let cam=0;
+const qHit={};
+
+const mario={x:3*T,y:10*T,vx:0,vy:0,w:26,h:32,onGround:false,facing:1,walkFrame:0,walkTimer:0,dead:false,deadTimer:0,inv:0,big:false,won:false,wonTimer:0};
+
+let enemies=[
+  {x:22*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:37*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:50*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:52*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:80*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:82*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:100*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:150*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+  {x:152*T,y:11*T,vx:-1.5,vy:0,alive:true,squished:false,squishTimer:0,frame:0,ft:0},
+];
+
+let particles=[];
+const keys={};
+let gameOver=false, gameWon=false, started=false;
+
+document.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(!started) started=true;
+  if((e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')&&mario.onGround&&!mario.dead&&!mario.won){
+    mario.vy=-13; mario.onGround=false;
+  }
+  e.preventDefault();
+});
+document.addEventListener('keyup',e=>{ keys[e.code]=false; });
+
+// ---- TILE HELPERS ----
+function getT(r,c){ return (r<0||r>=H||c<0||c>=W)?0:map[r][c]; }
+function solid(t){ return t==='G'||t==='B'||t==='Q'||t==='P'||t==='p'||t==='F'||t==='f'; }
+
+function resolveY(obj){
+  const {x,w,h} = obj;
+  const l=x+2, r=x+w-2;
+  if(obj.vy>=0){
+    const row=Math.floor((obj.y+h)/T);
+    if(solid(getT(row,Math.floor(l/T)))||solid(getT(row,Math.floor(r/T)))){
+      obj.y=row*T-h; obj.vy=0; obj.onGround=true; return;
+    }
+  }
+  if(obj.vy<0){
+    const row=Math.floor(obj.y/T);
+    const c1=Math.floor(l/T), c2=Math.floor(r/T);
+    const t1=getT(row,c1), t2=getT(row,c2);
+    if(solid(t1)||solid(t2)){
+      obj.y=(row+1)*T; obj.vy=0;
+      const hc=(solid(t1)?c1:c2);
+      const ht=getT(row,hc);
+      if(ht==='Q'&&!qHit[`${row},${hc}`]){
+        qHit[`${row},${hc}`]=true; map[row][hc]='B';
+        score+=200; coins++; updateHUD();
+        particles.push({x:hc*T+T/2,y:row*T,vy:-8,life:50,type:'coin'});
+      }
+    }
+  }
+}
+
+function resolveX(obj){
+  const {y,h} = obj;
+  const t=y+4, b=y+h-4;
+  if(obj.vx>0){
+    const col=Math.floor((obj.x+obj.w)/T);
+    if(solid(getT(Math.floor(t/T),col))||solid(getT(Math.floor(b/T),col))){
+      obj.x=col*T-obj.w; obj.vx=0;
+    }
+  }
+  if(obj.vx<0){
+    const col=Math.floor(obj.x/T);
+    if(solid(getT(Math.floor(t/T),col))||solid(getT(Math.floor(b/T),col))){
+      obj.x=(col+1)*T; obj.vx=0;
+    }
+  }
+}
+
+function updateHUD(){
+  document.getElementById('score').textContent=String(score).padStart(6,'0');
+  document.getElementById('coins').textContent='x'+String(coins).padStart(2,'0');
+  document.getElementById('timer').textContent=Math.ceil(time);
+  document.getElementById('lives').textContent='x0'+lives;
+}
+
+// ---- DRAW HELPERS ----
+function drawGround(x,y){
+  cx.fillStyle='#c84c0c'; cx.fillRect(x,y,T,T);
+  cx.fillStyle='#e86010'; cx.fillRect(x,y,T,6);
+  cx.fillStyle='#a03408';
+  cx.fillRect(x,y,2,T); cx.fillRect(x+T-2,y,2,T);
+  cx.fillRect(x,y+T/2-1,T,2);
+}
+function drawBrick(x,y){
+  cx.fillStyle='#c84c0c'; cx.fillRect(x,y,T,T);
+  cx.fillStyle='#e86010';
+  cx.fillRect(x+2,y+2,T-4,10); cx.fillRect(x+2,y+16,T/2-4,10); cx.fillRect(x+T/2+2,y+16,T/2-4,10);
+  cx.fillStyle='#a03408';
+  cx.fillRect(x,y,T,2); cx.fillRect(x,y,2,T); cx.fillRect(x+T-2,y,2,T); cx.fillRect(x,y+T-2,T,2);
+}
+function drawQuestion(x,y,hit){
+  if(hit){ cx.fillStyle='#888'; cx.fillRect(x,y,T,T); cx.fillStyle='#666'; cx.fillRect(x+3,y+3,T-6,T-6); return; }
+  const f=Math.floor(Date.now()/250)%2;
+  cx.fillStyle=f?'#f8b800':'#fcd800'; cx.fillRect(x,y,T,T);
+  cx.fillStyle='#c84c0c';
+  cx.fillRect(x,y,T,3); cx.fillRect(x,y,3,T); cx.fillRect(x+T-3,y,3,T); cx.fillRect(x,y+T-3,T,3);
+  cx.fillStyle='#fff'; cx.font='bold 20px monospace'; cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillText('?',x+T/2,y+T/2);
+}
+function drawPipeTop(x,y){ cx.fillStyle='#00a800'; cx.fillRect(x-4,y,T*2+8,T); cx.fillStyle='#006400'; cx.fillRect(x-4,y,6,T); cx.fillRect(x+T*2+2,y,6,T); cx.fillStyle='#00c800'; cx.fillRect(x,y+4,T*2,6); }
+function drawPipeBody(x,y){ cx.fillStyle='#00a800'; cx.fillRect(x,y,T*2,T); cx.fillStyle='#006400'; cx.fillRect(x,y,4,T); cx.fillRect(x+T*2-4,y,4,T); }
+
+function drawMario(m){
+  if(m.inv>0&&Math.floor(m.inv/4)%2===0) return;
+  const sx=m.x-cam, sy=m.y;
+  cx.save(); cx.translate(sx+m.w/2,sy+m.h/2); cx.scale(m.facing,1);
+  const f=m.walkFrame;
+  // hat
+  cx.fillStyle='#e40058'; cx.fillRect(-10,-16,20,6); cx.fillRect(-12,-10,24,4);
+  // face
+  cx.fillStyle='#fca044'; cx.fillRect(-8,-6,16,10);
+  // eyes
+  cx.fillStyle='#000'; cx.fillRect(2,-4,4,4);
+  // mustache
+  cx.fillStyle='#7c3410'; cx.fillRect(-6,0,12,3);
+  // body
+  cx.fillStyle='#e40058'; cx.fillRect(-10,4,20,10);
+  // overalls
+  cx.fillStyle='#0000c8'; cx.fillRect(-10,14,20,8);
+  cx.fillStyle='#e40058'; cx.fillRect(-4,14,4,4); cx.fillRect(0,14,4,4);
+  // legs
+  cx.fillStyle='#0000c8';
+  if(!m.onGround||f===0){ cx.fillRect(-10,22,8,8); cx.fillRect(2,22,8,8); }
+  else if(f===1){ cx.fillRect(-10,22,8,8); cx.fillRect(4,20,8,10); }
+  else { cx.fillRect(-12,20,8,10); cx.fillRect(2,22,8,8); }
+  // shoes
+  cx.fillStyle='#7c3410';
+  if(!m.onGround||f===0){ cx.fillRect(-12,28,10,4); cx.fillRect(2,28,10,4); }
+  else if(f===1){ cx.fillRect(-12,28,10,4); cx.fillRect(4,26,10,4); }
+  else { cx.fillRect(-14,26,10,4); cx.fillRect(2,28,10,4); }
+  cx.restore();
+}
+
+function drawGoomba(e){
+  const sx=e.x-cam, sy=e.y;
+  if(e.squished){ cx.fillStyle='#c84c0c'; cx.fillRect(sx,sy+24,T,8); cx.fillStyle='#000'; cx.fillRect(sx+4,sy+24,8,6); cx.fillRect(sx+20,sy+24,8,6); return; }
+  cx.fillStyle='#c84c0c';
+  cx.fillRect(sx+4,sy,24,14); cx.fillRect(sx,sy+12,T,12); cx.fillRect(sx+2,sy+8,28,8);
+  cx.fillStyle='#fff'; cx.fillRect(sx+6,sy+4,8,6); cx.fillRect(sx+18,sy+4,8,6);
+  cx.fillStyle='#000'; cx.fillRect(sx+8,sy+6,4,4); cx.fillRect(sx+20,sy+6,4,4);
+  cx.fillStyle='#000'; cx.fillRect(sx+4,sy+2,10,3); cx.fillRect(sx+18,sy+2,10,3);
+  cx.fillStyle='#7c3410';
+  if(e.frame===0){ cx.fillRect(sx,sy+24,12,8); cx.fillRect(sx+20,sy+24,12,8); }
+  else { cx.fillRect(sx+2,sy+22,12,10); cx.fillRect(sx+18,sy+24,12,8); }
+}
+
+function drawFlagPole(col){
+  const sx=col*T-cam;
+  cx.fillStyle='#888'; cx.fillRect(sx+T/2-2,2*T,4,11*T);
+  cx.fillStyle='#f8b800'; cx.beginPath(); cx.arc(sx+T/2,2*T,8,0,Math.PI*2); cx.fill();
+  cx.fillStyle='#00a800'; cx.fillRect(sx+T/2+2,2*T,24,16);
+}
+
+function drawCloud(x,y,w){
+  cx.fillStyle='#fff';
+  cx.fillRect(x+w*.2,y+10,w*.6,20); cx.fillRect(x,y+20,w,20);
+  cx.fillRect(x+w*.1,y+5,w*.3,20); cx.fillRect(x+w*.6,y+8,w*.3,20);
+}
+function drawHill(x,y,r){
+  cx.fillStyle='#00a800'; cx.beginPath(); cx.arc(x,y,r,Math.PI,0); cx.fill();
+  cx.fillStyle='#00c800'; cx.beginPath(); cx.arc(x-r*.2,y-r*.3,r*.3,Math.PI,0); cx.fill();
+}
+function drawBush(x,y,w){
+  cx.fillStyle='#00a800';
+  cx.fillRect(x,y+10,w,20); cx.fillRect(x+w*.1,y,w*.8,20); cx.fillRect(x+w*.25,y-8,w*.5,16);
+}
+
+// ---- GAME LOOP ----
+let last=0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-last)/16.67,3); last=ts;
+
+  // Sky
+  cx.fillStyle='#5c94fc'; cx.fillRect(0,0,cv.width,cv.height);
+
+  // Background decorations
+  const BG=[
+    {t:'hill',x:0,y:12*T,r:80},{t:'hill',x:6*T,y:12*T,r:48},{t:'hill',x:16*T,y:12*T,r:80},
+    {t:'hill',x:25*T,y:12*T,r:48},{t:'hill',x:36*T,y:12*T,r:80},{t:'hill',x:60*T,y:12*T,r:80},
+    {t:'cloud',x:1*T,y:2*T,w:96},{t:'cloud',x:5*T,y:T,w:64},{t:'cloud',x:11*T,y:2*T,w:96},
+    {t:'cloud',x:17*T,y:T,w:64},{t:'cloud',x:24*T,y:2*T,w:96},{t:'cloud',x:31*T,y:T,w:64},
+    {t:'cloud',x:40*T,y:2*T,w:96},{t:'cloud',x:50*T,y:T,w:64},{t:'cloud',x:60*T,y:2*T,w:96},
+    {t:'bush',x:3*T,y:11*T,w:64},{t:'bush',x:9*T,y:11*T,w:48},{t:'bush',x:20*T,y:11*T,w:64},
+    {t:'bush',x:30*T,y:11*T,w:48},{t:'bush',x:42*T,y:11*T,w:64},{t:'bush',x:55*T,y:11*T,w:64},
+  ];
+  BG.forEach(b=>{
+    const sx=b.x-cam;
+    if(sx>-200&&sx<cv.width+200){
+      if(b.t==='hill') drawHill(sx,b.y,b.r);
+      else if(b.t==='cloud') drawCloud(sx,b.y,b.w);
+      else drawBush(sx,b.y,b.w);
+    }
+  });
+
+  // Tiles
+  const sc=Math.max(0,Math.floor(cam/T)-1), ec=Math.min(W,Math.ceil((cam+cv.width)/T)+2);
+  for(let r=0;r<H;r++) for(let c=sc;c<ec;c++){
+    const t=map[r][c]; if(!t) continue;
+    const tx=c*T-cam, ty=r*T;
+    if(t==='G') drawGround(tx,ty);
+    else if(t==='B') drawBrick(tx,ty);
+    else if(t==='Q') drawQuestion(tx,ty,!!qHit[`${r},${c}`]);
+    else if(t==='p') drawPipeTop(tx-4,ty);
+    else if(t==='P') drawPipeBody(tx,ty);
+    else if(t==='F'){ cx.fillStyle='#888'; cx.fillRect(tx+T/2-2,ty,4,T); }
+    else if(t==='f') drawFlagPole(c);
+  }
+
+  // Particles
+  particles=particles.filter(p=>p.life>0);
+  particles.forEach(p=>{
+    p.y+=p.vy; p.vy+=0.4; p.life--;
+    if(p.type==='coin'){ cx.fillStyle='#f8b800'; cx.beginPath(); cx.arc(p.x-cam,p.y,8,0,Math.PI*2); cx.fill(); }
+  });
+
+  if(!gameOver&&!gameWon){
+    // Timer
+    timeAcc+=dt;
+    if(timeAcc>=60){ time=Math.max(0,time-1); timeAcc=0; updateHUD(); }
+
+    // Enemies
+    enemies.forEach(e=>{
+      if(!e.alive) return;
+      if(e.squished){ e.squishTimer--; if(e.squishTimer<=0) e.alive=false; drawGoomba(e); return; }
+      e.vy+=0.4*dt; e.x+=e.vx*dt; e.y+=e.vy*dt;
+      e.ft+=dt; if(e.ft>15){ e.frame=1-e.frame; e.ft=0; }
+      // ground
+      const er=Math.floor((e.y+T)/T);
+      const ec1=Math.floor((e.x+2)/T), ec2=Math.floor((e.x+T-2)/T);
+      if(solid(getT(er,ec1))||solid(getT(er,ec2))){ e.y=er*T-T; e.vy=0; }
+      // walls
+      if(e.vx>0){ const ec=Math.floor((e.x+T)/T); if(solid(getT(Math.floor((e.y+8)/T),ec))||solid(getT(Math.floor((e.y+T-8)/T),ec))) e.vx=-Math.abs(e.vx); }
+      if(e.vx<0){ const ec=Math.floor(e.x/T); if(solid(getT(Math.floor((e.y+8)/T),ec))||solid(getT(Math.floor((e.y+T-8)/T),ec))) e.vx=Math.abs(e.vx); }
+      // fall off
+      if(e.y>H*T) e.alive=false;
+      drawGoomba(e);
+    });
+
+    // Mario update
+    if(mario.dead){
+      mario.deadTimer+=dt;
+      if(mario.deadTimer===1) mario.vy=-12;
+      mario.vy+=0.4*dt; mario.y+=mario.vy*dt;
+      drawMario(mario);
+      if(mario.y>H*T+100){
+        lives--; updateHUD();
+        if(lives<=0){ gameOver=true; }
+        else { resetMario(); }
+      }
+      return;
+    }
+
+    if(mario.won){
+      mario.wonTimer+=dt;
+      mario.x+=2*dt;
+      if(mario.wonTimer>120) gameWon=true;
+      drawMario(mario);
+      return;
+    }
+
+    // Input
+    const spd=keys['ShiftLeft']||keys['ShiftRight']?6:4;
+    if(keys['ArrowLeft']||keys['KeyA']){ mario.vx=-spd; mario.facing=-1; }
+    else if(keys['ArrowRight']||keys['KeyD']){ mario.vx=spd; mario.facing=1; }
+    else mario.vx*=0.7;
+
+    mario.vy+=0.5*dt;
+    mario.x+=mario.vx*dt; mario.y+=mario.vy*dt;
+    mario.onGround=false;
+    resolveX(mario); resolveY(mario);
+
+    // Walk animation
+    if(mario.onGround&&Math.abs(mario.vx)>0.5){ mario.walkTimer+=dt; if(mario.walkTimer>8){ mario.walkFrame=(mario.walkFrame+1)%3; mario.walkTimer=0; } }
+    else if(mario.onGround) mario.walkFrame=0;
+
+    // Camera
+    const target=mario.x-cv.width/3;
+    cam=Math.max(0,Math.min(target,(W-1)*T-cv.width));
+
+    // Fall death
+    if(mario.y>H*T) killMario();
+
+    // Enemy collision
+    if(mario.inv<=0){
+      enemies.forEach(e=>{
+        if(!e.alive||e.squished) return;
+        const mx=mario.x,my=mario.y,mw=mario.w,mh=mario.h;
+        const ex=e.x,ey=e.y;
+        if(mx+mw-4>ex+4&&mx+4<ex+T-4&&my+mh>ey+4&&my<ey+T){
+          if(mario.vy>0&&my+mh<ey+T/2+8){
+            e.squished=true; e.squishTimer=30; mario.vy=-8; score+=100; updateHUD();
+          } else { killMario(); }
+        }
+      });
+    }
+    if(mario.inv>0) mario.inv-=dt;
+
+    // Flag check
+    if(Math.floor(mario.x/T)>=198&&!mario.won){ mario.won=true; score+=5000; updateHUD(); }
+
+    drawMario(mario);
+  }
+
+  // Overlays
+  if(gameOver){
+    cx.fillStyle='rgba(0,0,0,0.6)'; cx.fillRect(0,0,cv.width,cv.height);
+    cx.fillStyle='#fff'; cx.font='bold 36px monospace'; cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText('GAME OVER',cv.width/2,cv.height/2-20);
+    cx.font='18px monospace'; cx.fillText('按 R 重新开始',cv.width/2,cv.height/2+30);
+  }
+  if(gameWon){
+    cx.fillStyle='rgba(0,0,0,0.6)'; cx.fillRect(0,0,cv.width,cv.height);
+    cx.fillStyle='#f8b800'; cx.font='bold 36px monospace'; cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText('YOU WIN! 🎉',cv.width/2,cv.height/2-20);
+    cx.fillStyle='#fff'; cx.font='18px monospace'; cx.fillText('得分: '+score,cv.width/2,cv.height/2+30);
+    cx.fillText('按 R 重新开始',cv.width/2,cv.height/2+60);
+  }
+  if(!started){
+    cx.fillStyle='rgba(0,0,0,0.5)'; cx.fillRect(0,0,cv.width,cv.height);
+    cx.fillStyle='#fff'; cx.font='bold 28px monospace'; cx.textAlign='center'; cx.textBaseline='middle';
+    cx.fillText('Super Mario Bros',cv.width/2,cv.height/2-40);
+    cx.font='18px monospace'; cx.fillText('← → 移动  空格/↑ 跳跃  Shift 加速',cv.width/2,cv.height/2+10);
+    cx.fillText('按任意键开始',cv.width/2,cv.height/2+50);
+  }
+}
+
+function killMario(){
+  if(mario.inv>0) return;
+  mario.dead=true; mario.deadTimer=0; mario.vy=-12;
+}
+
+function resetMario(){
+  mario.x=3*T; mario.y=10*T; mario.vx=0; mario.vy=0;
+  mario.dead=false; mario.deadTimer=0; mario.inv=120;
+  mario.won=false; mario.wonTimer=0; cam=0;
+}
+
+document.addEventListener('keydown',e=>{ if(e.code==='KeyR'&&(gameOver||gameWon)){ location.reload(); } });
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
